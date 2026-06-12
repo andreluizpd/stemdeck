@@ -74,6 +74,11 @@ MAX_PENDING_JOBS = max(1, min(50, _env_int("STEMDECK_MAX_PENDING_JOBS", 3)))
 TIMEOUT_FFMPEG = _env_int("STEMDECK_TIMEOUT_FFMPEG", 300)
 TIMEOUT_ANALYZE = _env_int("STEMDECK_TIMEOUT_ANALYZE", 120)
 TIMEOUT_DEMUCS_STALL = _env_int("STEMDECK_TIMEOUT_DEMUCS_STALL", 1800)
+RUBBERBAND_BIN = _env_path(
+    "STEMDECK_RUBBERBAND",
+    FFMPEG_DIR
+    / ("rubberband.exe" if sys.platform.startswith("win") else "rubberband"),
+)
 
 
 def ffmpeg_executable() -> str:

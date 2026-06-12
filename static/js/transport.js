@@ -9,8 +9,27 @@ import {
   setLoopEnabled, setLoopStart, setLoopEnd, setMasterVolume,
 } from "./state.js";
 import { applyMix } from "./mixer.js";
+import { kickSpectrum } from "./spectrumAnalyzer.js";
 
 const MIN_LOOP_SEC = 0.2;
+const STOP_TOLERANCE_SEC = 0.15;
+
+/** Stop button glows when paused at the transport start (0 or loopStart). */
+export function updateStopVisual() {
+  const src = audioEngine ?? multitrack;
+  if (!src) return;
+  const t = src.getCurrentTime?.() ?? 0;
+  const startPos = loopEnabled ? loopStart : 0;
+  const atStart = Math.abs(t - startPos) < STOP_TOLERANCE_SEC;
+  const stopped = !src.isPlaying() && atStart;
+  stopBtn.classList.toggle("stopped", stopped);
+}
+
+/** Sync play/pause chrome after transport was paused outside togglePlayPause. */
+export function setTransportPausedUi() {
+  playBtn.classList.remove("playing");
+  updateStopVisual();
+}
 // Below this visible width the waveform stops compressing to fit and instead
 // keeps a minimum size, overflowing horizontally so .wave-scroll can scroll.
 const WAVE_MIN_WIDTH = 720;
@@ -215,7 +234,7 @@ export function togglePlayPause() {
     // The engine emits no play/pause events (the multitrack stays silent), so
     // the play-button visual that the ws "pause" handler normally toggles must
     // be driven here directly.
-    if (eng) playBtn.classList.remove("playing");
+    setTransportPausedUi();
     return;
   }
   const ctx = tx.audioContext;
@@ -231,9 +250,11 @@ export function togglePlayPause() {
   }
   if (eng) {
     eng.play();
+    kickSpectrum(eng.audioContext);
     playBtn.classList.add("playing");
     stopBtn.classList.remove("stopped");
   } else {
+    kickSpectrum(multitrack?.audioContext);
     _playWhenReady();
   }
 }
@@ -244,7 +265,7 @@ export function stopTransport() {
   if (!tx) return;
   tx.pause();
   tx.setTime(loopEnabled ? loopStart : 0); // engine: setTime → onTime → stop visual
-  if (eng) playBtn.classList.remove("playing");
+  setTransportPausedUi();
 }
 
 export function toggleLoop() {

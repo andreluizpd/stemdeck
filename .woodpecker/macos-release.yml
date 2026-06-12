@@ -41,6 +41,7 @@ steps:
         echo "ARM64_PYTHON=$ARM64_PYTHON" >> .macos-release.env
       - scripts/macos/make-iconset.sh
       - . ./.macos-release.env && ARCH=arm64 VERSION="$VERSION" PYTHON_BIN="$ARM64_PYTHON" scripts/macos/make-runtime-pack.sh
+      - ARCH=arm64 scripts/macos/make-rubberband-pack.sh
       - ARCH=arm64 VERSION="$VERSION" scripts/macos/make-app.sh
       - ARCH=arm64 VERSION="$VERSION" scripts/macos/make-dmg.sh
 
@@ -67,6 +68,7 @@ steps:
         X64_PYTHON="$(uv python find cpython-3.12-macos-x86_64-none)"
         echo "X64_PYTHON=$X64_PYTHON" >> .macos-release.env
       - . ./.macos-release.env && ARCH=x64 VERSION="$VERSION" PYTHON_BIN="$X64_PYTHON" scripts/macos/make-runtime-pack.sh
+      - ARCH=x64 scripts/macos/make-rubberband-pack.sh
       - ARCH=x64 VERSION="$VERSION" scripts/macos/make-app.sh
       - ARCH=x64 VERSION="$VERSION" scripts/macos/make-dmg.sh
 
@@ -78,9 +80,11 @@ steps:
     commands:
       - test -f .build/macos-dist/StemDeck-macOS-arm64.dmg
       - test -f .build/StemDeck-runtime-macOS-arm64.tar.zst
+      - test -f .build/StemDeck-rubberband-macOS-arm64.tar.zst
       - test -f .build/macos-dist/SHA256SUMS-macOS-arm64.txt
       - test -f .build/macos-dist/StemDeck-macOS-x64.dmg
       - test -f .build/StemDeck-runtime-macOS-x64.tar.zst
+      - test -f .build/StemDeck-rubberband-macOS-x64.tar.zst
       - test -f .build/macos-dist/SHA256SUMS-macOS-x64.txt
       - cat .build/macos-dist/SHA256SUMS-macOS-arm64.txt
       - cat .build/macos-dist/SHA256SUMS-macOS-x64.txt
@@ -135,7 +139,7 @@ steps:
           exit 1
         fi
       - |
-        scan_note="macOS arm64 and x64 DMGs and runtime packs were built and inspected on a macOS Woodpecker agent before upload."
+        scan_note="macOS arm64 and x64 DMGs, runtime packs, and Rubber Band packs were built and inspected on a macOS Woodpecker agent before upload."
         body="$(gh release view "$CI_COMMIT_TAG" --repo "stemdeckapp/stemdeck" --json body --jq ".body")"
         case "$body" in
           *"$scan_note"*) ;;
@@ -159,8 +163,10 @@ steps:
         gh release upload "$CI_COMMIT_TAG" \
           ".build/macos-dist/StemDeck-macOS-arm64.dmg" \
           ".build/StemDeck-runtime-macOS-arm64.tar.zst" \
+          ".build/StemDeck-rubberband-macOS-arm64.tar.zst" \
           ".build/macos-dist/SHA256SUMS-macOS-arm64.txt" \
           ".build/macos-dist/StemDeck-macOS-x64.dmg" \
           ".build/StemDeck-runtime-macOS-x64.tar.zst" \
+          ".build/StemDeck-rubberband-macOS-x64.tar.zst" \
           ".build/macos-dist/SHA256SUMS-macOS-x64.txt" \
           --repo "stemdeckapp/stemdeck"

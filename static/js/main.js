@@ -1,7 +1,9 @@
 import {
-  playBtn, loopBtn, multitrack, totalDuration, loopEnabled, loopStart, loopEnd,
+  playBtn, loopBtn, multitrack, audioEngine, totalDuration, loopEnabled, loopStart, loopEnd,
   setLoopStart, setLoopEnd, selectedStems, saveSelectedStems, stemSelectionReady,
 } from "./state.js";
+import { wirePitchTempoControls } from "./pitchTempo.js";
+import { wireSpectrumToggle, initSpectrumPlaceholder } from "./spectrumAnalyzer.js";
 import { STEM_NAMES, syncStemNamesFromAPI } from "./constants.js";
 import { renderEmptyShell, buildStripStems, downloadCurrentMix, downloadAllStemsZip, downloadRegionMix, drawFooterPlaceholder } from "./player.js";
 import { wireJobForm, showError } from "./job.js";
@@ -102,6 +104,8 @@ wireJobForm();
 wireTransportButtons();
 wireFooterControls();
 requestAnimationFrame(drawFooterPlaceholder);
+wireSpectrumToggle();
+initSpectrumPlaceholder();
 wireStemListControls();
 wireMixerToolbar();
 wireStemChoiceButtons();
@@ -226,14 +230,17 @@ function wireFooterControls() {
     else if (e.key === "ArrowUp") { e.preventDefault(); focusable[(idx - 1 + focusable.length) % focusable.length]?.focus(); }
   });
 
+  wirePitchTempoControls(closeAllChipPanels);
+
   // ── Scrub bar seek ──
   const scrub = document.getElementById("footer-scrub");
   if (scrub) {
     function seekToX(clientX) {
-      if (!multitrack || !totalDuration) return;
+      const tx = audioEngine ?? multitrack;
+      if (!tx || !totalDuration) return;
       const rect = scrub.getBoundingClientRect();
       const frac = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-      multitrack.setTime(frac * totalDuration);
+      tx.setTime(frac * totalDuration);
     }
     let _scrubbing = false;
     scrub.addEventListener("mousedown", (e) => {

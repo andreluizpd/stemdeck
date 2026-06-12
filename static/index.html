@@ -585,6 +585,36 @@
           </div>
 
           <div class="footer-chips">
+            <button class="footer-chip" id="t-spectrum-btn" type="button" aria-pressed="true">Spectrum</button>
+            <div class="footer-chip-wrap" id="footer-pitch-tempo-wrap">
+              <button class="footer-chip" id="t-pitch-tempo-btn" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="t-pitch-tempo-panel">
+                Pitch / Tempo
+              </button>
+              <div class="footer-chip-panel chip-panel-pitch-tempo hidden" id="t-pitch-tempo-panel" role="dialog" aria-label="Pitch and tempo">
+                <div class="pitch-tempo-row">
+                  <label class="pitch-tempo-label" for="t-pitch">Pitch</label>
+                  <button class="pitch-tempo-step" id="t-pitch-minus" type="button" aria-label="Decrease pitch">−</button>
+                  <input class="pitch-tempo-slider" id="t-pitch" type="range" min="-12" max="12" step="1" value="0" />
+                  <button class="pitch-tempo-step" id="t-pitch-plus" type="button" aria-label="Increase pitch">+</button>
+                  <span class="pitch-tempo-val-wrap">
+                    <span class="pitch-tempo-val num" id="t-pitch-val">0 st</span>
+                    <span class="pitch-tempo-key num hidden" id="t-pitch-key" aria-hidden="true"></span>
+                  </span>
+                </div>
+                <div class="pitch-tempo-row">
+                  <label class="pitch-tempo-label" for="t-tempo">Tempo</label>
+                  <button class="pitch-tempo-step" id="t-tempo-minus" type="button" aria-label="Decrease tempo">−</button>
+                  <input class="pitch-tempo-slider" id="t-tempo" type="range" min="50" max="200" step="5" value="100" />
+                  <button class="pitch-tempo-step" id="t-tempo-plus" type="button" aria-label="Increase tempo">+</button>
+                  <span class="pitch-tempo-val num" id="t-tempo-val">100%</span>
+                </div>
+                <label class="pitch-tempo-check">
+                  <input type="checkbox" id="t-preserve-pitch" checked />
+                  <span>Preserve pitch when changing tempo</span>
+                </label>
+                <button class="chip-panel-item pitch-tempo-reset" id="t-pitch-tempo-reset" type="button">Reset</button>
+              </div>
+            </div>
             <div class="footer-chip-wrap" id="footer-export-wrap">
               <button class="footer-chip footer-chip-primary" id="t-export-btn" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="t-export-panel">
                 <svg class="export-dl-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -637,6 +667,10 @@
           </div>
 
         </div><!-- /.footer-content -->
+
+        <div class="footer-spectrum-bar" id="footer-spectrum-bar">
+          <canvas id="footer-spectrum" aria-hidden="true"></canvas>
+        </div>
 
         <!-- Full-width waveform bar -->
         <div class="footer-wave-bar">

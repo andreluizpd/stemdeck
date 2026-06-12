@@ -4,6 +4,7 @@ import {
   eventSource, setEventSource, setCurrentJobId, currentJobId,
   selectedStems,
 } from "./state.js";
+import { setDetectedBpm, setDetectedKey } from "./pitchTempo.js";
 import { destroyPlayer, wireUpAudio, setWaveformLoading, updateFooterTrack } from "./player.js";
 import { stagePhrases } from "./phrases.js";
 import { addTrackToLibrary, setCurrentTrack, updateTrackStatus, applyStemPresenceCards } from "./catalog.js";
@@ -133,7 +134,9 @@ function applyState(state) {
     jobTitleEl.textContent = state.title;
     titleEl.textContent = state.title;
   }
-  if (state.bpm) bpmChip.textContent = `${state.bpm} BPM`;
+  if (state.bpm) setDetectedBpm(state.bpm);
+  else setDetectedBpm(null);
+  setDetectedKey(state.key ?? null);
   if (state.key) keyChip.textContent = state.key;
   if (state.title || state.bpm || state.key || state.thumbnail) {
     updateFooterTrack({

@@ -25,6 +25,7 @@ from app.core.config import (
 )
 from app.core.registry import restore as restore_registry
 from app.pipeline.collect import sweep_old_jobs
+from app.pipeline.pitch_tempo import pitch_tempo_available
 
 # Show our INFO-level logs through uvicorn's root handler. Without this,
 # Python's default root level (WARNING) silently drops every
@@ -146,6 +147,7 @@ def health() -> dict[str, object]:
         "ffmpeg_configured": FFMPEG_BIN.is_file(),
         "demucs_model": DEMUCS_MODEL,
         "demucs_device": DEMUCS_DEVICE,
+        "pitch_tempo_available": pitch_tempo_available(),
     }
 
 

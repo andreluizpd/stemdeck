@@ -57,6 +57,33 @@ def test_requires_done_status(client, tmp_path):
     assert r.status_code == 404
 
 
+def test_stem_pitch_tempo_query(client, tmp_path):
+    if not __import__("app.pipeline.pitch_tempo", fromlist=["pitch_tempo"]).pitch_tempo_available():
+        import pytest
+
+        pytest.skip("rubberband not available")
+
+    import struct
+
+    sr = 8000
+    nframes = sr // 5
+    data = b"\x00\x00" * nframes
+    hdr = b"RIFF" + struct.pack("<I", 36 + len(data)) + b"WAVE"
+    hdr += b"fmt " + struct.pack("<IHHIIHH", 16, 1, 1, sr, sr * 2, 2, 16)
+    hdr += b"data" + struct.pack("<I", len(data))
+    wav = hdr + data
+
+    job = Job(id="abcdefabcdf0")
+    job.status = "done"
+    _jobs[job.id] = job
+    _make_stem_file(tmp_path, job.id, "vocals", wav)
+
+    r = client.get(f"/api/jobs/{job.id}/stems/vocals.wav?pitch=1&tempo=1.05")
+    assert r.status_code == 200
+    assert r.content[:4] == b"RIFF"
+    assert len(r.content) > len(wav) * 0.5
+
+
 def test_serves_done_job_stem(client, tmp_path):
     job = Job(id="abcdefabcdee")
     job.status = "done"

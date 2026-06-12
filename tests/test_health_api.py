@@ -15,5 +15,6 @@ def test_health_endpoints_report_ok():
             assert body["status"] == "ok"
             assert body["version"]
             assert "ffmpeg_configured" in body
+            assert "pitch_tempo_available" in body
             assert "jobs_dir" not in body
             assert "data_dir" not in body

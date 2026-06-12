@@ -20,6 +20,16 @@ import {
 } from "./state.js";
 import { createAudioEngine, estimateDecodedBytes } from "./audioEngine.js";
 import {
+  registerPitchTempoReload,
+  stemUrlWithPitchTempo,
+  pitchTempoQueryParams,
+  isRubberbandAvailable,
+  isPitchTempoIdentity,
+  setDetectedKey,
+  syncPitchTempoUi,
+  syncPitchTempoUiAfterEngineReady,
+} from "./pitchTempo.js";
+import {
   loadMixIntoState, resetMixerState, refreshMixerVisuals,
   setLaneControlsEnabled, ensureMixerStateDefaults, applyMix,
   renderRealMiniWave, renderMixerRow,
@@ -27,10 +37,16 @@ import {
 import {
   buildRuler, updatePlayheadMarker, updateLoopRegionVisual,
   applyWaveZoom, buildPresenceRuler, updateFooterTimes,
-  updatePresencePlayhead,
+  updatePresencePlayhead, updateStopVisual, setTransportPausedUi,
 } from "./transport.js";
-import { stopVuLoop } from "./audio.js";
+import { attachAnalysers, stopVuLoop } from "./audio.js";
 import { destroySections } from "./sections.js";
+import {
+  startSpectrumAnalyzer,
+  stopSpectrumAnalyzer,
+  initSpectrumPlaceholder,
+  kickSpectrum,
+} from "./spectrumAnalyzer.js";
 
 // Feature flag for the Web Audio decode-and-mix engine (audioEngine.js).
 // Playback runs off decoded AudioBuffers on a single AudioContext clock instead
@@ -498,6 +514,90 @@ function buildStemVuEnvelope(audioBuffer) {
   return env;
 }
 
+const _spectrumScratch = new Uint8Array(2048);
+
+function resumeAudioContext(ctx) {
+  if (ctx?.state === "suspended") ctx.resume().catch(() => {});
+}
+
+function readBinsFromEngine(eng, out) {
+  out.fill(0);
+  let maxBins = 0;
+  let peak = 0;
+
+  for (const name of TRACK_NAMES) {
+    if (trackIndex[name] === undefined) continue;
+    const analyser = eng.getAnalyser?.(name);
+    if (!analyser) continue;
+    const gain = stemVuGain(name);
+    if (gain <= 0) continue;
+    const n = analyser.frequencyBinCount;
+    if (_spectrumScratch.length < n) return 0;
+    analyser.getByteFrequencyData(_spectrumScratch.subarray(0, n));
+    for (let b = 0; b < n; b++) {
+      const v = Math.min(255, Math.round(_spectrumScratch[b] * gain));
+      if (v > out[b]) out[b] = v;
+      if (v > peak) peak = v;
+    }
+    if (n > maxBins) maxBins = n;
+  }
+
+  if (maxBins > 0 && peak > 0) return maxBins;
+
+  const mix = eng.getMixAnalyser?.();
+  if (!mix) return maxBins;
+  const n = mix.frequencyBinCount;
+  if (out.length < n) return maxBins;
+  mix.getByteFrequencyData(out.subarray(0, n));
+  return n;
+}
+
+function createStreamingSpectrumReader() {
+  return (out) => {
+    if (!trackAnalysers.length) return 0;
+    out.fill(0);
+    let maxBins = 0;
+    for (const t of trackAnalysers) {
+      const n = t.analyser.frequencyBinCount;
+      if (_spectrumScratch.length < n) return 0;
+      t.analyser.getByteFrequencyData(_spectrumScratch.subarray(0, n));
+      const gain = t.stemName ? stemVuGain(t.stemName) : 1;
+      if (gain <= 0) continue;
+      for (let b = 0; b < n; b++) {
+        const v = Math.min(255, Math.round(_spectrumScratch[b] * gain));
+        if (v > out[b]) out[b] = v;
+      }
+      if (n > maxBins) maxBins = n;
+    }
+    return maxBins;
+  };
+}
+
+function liveSpectrumSampleRate() {
+  return audioEngine?.audioContext?.sampleRate
+    ?? multitrack?.audioContext?.sampleRate
+    ?? 44100;
+}
+
+/** Always resolve the active engine at read time — pitch/tempo reload swaps instances. */
+function liveSpectrumReadBins(out) {
+  if (audioEngine?.getAnalyser || audioEngine?.getMixAnalyser) {
+    resumeAudioContext(audioEngine.audioContext);
+    return readBinsFromEngine(audioEngine, out);
+  }
+  resumeAudioContext(multitrack?.audioContext);
+  return createStreamingSpectrumReader()(out);
+}
+
+function wireSpectrumAnalyzer() {
+  const canvas = document.getElementById("footer-spectrum");
+  if (!canvas) return;
+  startSpectrumAnalyzer(canvas, {
+    sampleRate: liveSpectrumSampleRate,
+    readBins: liveSpectrumReadBins,
+  });
+}
+
 function stemVuGain(stemName) {
   const state = mixerState[stemName];
   if (!state) return 0;
@@ -583,6 +683,7 @@ export function destroyPlayer() {
   destroySections();
   stopVuLoop();
   stopStemVuLoop();
+  stopSpectrumAnalyzer();
   if (audioEngine) {
     audioEngine.destroy();
     setAudioEngine(null);
@@ -623,6 +724,7 @@ export function destroyPlayer() {
   stemsChip.textContent = "\u2014 Stems";
   timeEl.textContent = "00:00 / 00:00";
   resetAnalysisCards();
+  setDetectedKey(null);
 
   trackAnalysers.length = 0;
   for (const row of document.querySelectorAll(".energy-row")) {
@@ -767,6 +869,8 @@ export function wireUpAudio(jobId, stems, duration, thumbnail, mixUrl = null, ti
   setWaveformLoading(true);
   stopVuLoop();
   stopStemVuLoop();
+  stopSpectrumAnalyzer();
+  trackAnalysers.length = 0;
   if (multitrack) {
     multitrack.destroy();
     setMultitrack(null);
@@ -946,19 +1050,6 @@ export function wireUpAudio(jobId, stems, duration, thumbnail, mixUrl = null, ti
     }
   });
 
-  // Stop button glows iff transport is paused AND at the "start" (0,
-  // or loopStart if loop is on). Centralised here so manual seeks via
-  // the ruler also update the visual without extra plumbing.
-  const STOP_TOLERANCE_SEC = 0.15;
-  const updateStopVisual = () => {
-    const src = audioEngine ?? mt;
-    const t = src.getCurrentTime?.() ?? 0;
-    const startPos = loopEnabled ? loopStart : 0;
-    const atStart = Math.abs(t - startPos) < STOP_TOLERANCE_SEC;
-    const stopped = !src.isPlaying() && atStart;
-    stopBtn.classList.toggle("stopped", stopped);
-  };
-
   mt.once("canplay", () => {
     setWaveformLoading(false);
     const ctx = mt.audioContext;
@@ -1024,6 +1115,8 @@ export function wireUpAudio(jobId, stems, duration, thumbnail, mixUrl = null, ti
         }
         renderStemEnergyBaseline(stems, decoded);
         startStemVuLoop(stems, decoded, token);
+        attachAnalysers();
+        wireSpectrumAnalyzer();
       });
     }
 
@@ -1074,7 +1167,11 @@ export function wireUpAudio(jobId, stems, duration, thumbnail, mixUrl = null, ti
         updateStopVisual();
       };
       if (audioEngine) { audioEngine.destroy(); setAudioEngine(null); }
-      const eng = createAudioEngine(stems, {
+      const playbackStems = stems.map((s) => ({
+        ...s,
+        url: s.url ? stemUrlWithPitchTempo(s.url) : s.url,
+      }));
+      const eng = createAudioEngine(playbackStems, {
         onTime: driveTransportUi,
         onEnded: () => { playBtn.classList.remove("playing"); updateStopVisual(); },
       });
@@ -1095,6 +1192,12 @@ export function wireUpAudio(jobId, stems, duration, thumbnail, mixUrl = null, ti
         }
         eng.setLoop(loopEnabled, loopStart, loopEnd);
         applyMix(); // push per-stem gains (incl. >1.0 boost) into the engine
+        if (isRubberbandAvailable() && !isPitchTempoIdentity()) {
+          setTotalDuration(eng.getDuration() || totalDuration);
+          buildRuler(totalDuration);
+          buildPresenceRuler(totalDuration);
+        }
+        syncPitchTempoUiAfterEngineReady();
         // Drive the decode-dependent visuals from the engine's own decoded
         // buffers (the null-URL multitrack has none): overview waveforms (when
         // no precomputed peaks), energy bars, VU envelopes, and lane mini-waves.
@@ -1111,6 +1214,8 @@ export function wireUpAudio(jobId, stems, duration, thumbnail, mixUrl = null, ti
             renderDecodedStemVisuals(stem.name, buf, STEM_COLORS[stem.name] || "#a0a0a0");
           }
         }
+        wireSpectrumAnalyzer();
+        kickSpectrum(eng.audioContext);
       }).catch((e) => {
         console.warn("[player] audio engine init failed; using streaming path:", e);
         eng.destroy();
@@ -1304,6 +1409,10 @@ function _mixdownUrl(ext, region) {
     stems: names.join(","),
     gains: gains.map((g) => g.toFixed(3)).join(","),
   });
+  const pt = pitchTempoQueryParams();
+  if (pt) {
+    for (const [k, v] of Object.entries(pt)) q.set(k, v);
+  }
   if (region) {
     q.set("start", loopStart.toFixed(3));
     q.set("end", loopEnd.toFixed(3));
@@ -1363,8 +1472,100 @@ export function downloadAllStemsZip(format = "wav") {
     .replace(/^_+|_+$/g, "");
   const name = safe ? `${safe}_stems.zip` : "stems.zip";
   const q = new URLSearchParams({ format, stems: names.join(",") });
+  const pt = pitchTempoQueryParams();
+  if (pt) {
+    for (const [k, v] of Object.entries(pt)) q.set(k, v);
+  }
   _triggerDownload(`/api/jobs/${currentJobId}/stems/all.zip?${q}`, name);
 }
+
+export async function reloadStemsForPitchTempo() {
+  if (!multitrack || !_currentStems.length || !currentJobId) return;
+  if (!isRubberbandAvailable()) return;
+
+  const tx = audioEngine ?? multitrack;
+  const prevDur = totalDuration || tx?.getDuration?.() || 0;
+  const frac = prevDur > 0
+    ? Math.max(0, Math.min(1, (tx?.getCurrentTime?.() ?? 0) / prevDur))
+    : 0;
+
+  tx?.pause?.();
+  setTransportPausedUi();
+
+  const playbackStems = _currentStems
+    .filter((s) => s.url)
+    .map((s) => ({ name: s.name, url: stemUrlWithPitchTempo(s.url) }));
+  if (!playbackStems.length) return;
+
+  setWaveformLoading(true, "Applying pitch and tempo…");
+  syncPitchTempoUi();
+
+  const driveTransportUi = (t) => {
+    timeEl.textContent = `${fmtTime(t)} / ${fmtTime(totalDuration)}`;
+    updatePlayheadMarker(t);
+    updateFooterTimes(t);
+    updatePresencePlayhead(t);
+    updateStopVisual();
+  };
+
+  try {
+    if (audioEngine || audioEngineEnabled()) {
+      if (audioEngine) {
+        audioEngine.destroy();
+        setAudioEngine(null);
+      }
+      const eng = createAudioEngine(playbackStems, {
+        onTime: driveTransportUi,
+        onEnded: () => { playBtn.classList.remove("playing"); updateStopVisual(); },
+      });
+      setAudioEngine(eng);
+      const ok = await eng.ready;
+      if (!ok) throw new Error("decode failed");
+      const newDur = eng.getDuration() || totalDuration;
+      setTotalDuration(newDur);
+      buildRuler(newDur);
+      buildPresenceRuler(newDur);
+      eng.setLoop(loopEnabled, loopStart, loopEnd);
+      applyMix();
+      const seekTo = frac * newDur;
+      eng.seek(seekTo);
+      driveTransportUi(seekTo);
+      setTransportPausedUi();
+      wireSpectrumAnalyzer();
+      return;
+    }
+
+    await Promise.all(
+      playbackStems.map((stem) => new Promise((resolve) => {
+        const idx = trackIndex[stem.name];
+        const audio = multitrack?.audios?.[idx];
+        if (!(audio instanceof HTMLMediaElement) || !stem.url) { resolve(); return; }
+        const done = () => { audio.removeEventListener("canplay", done); resolve(); };
+        audio.addEventListener("canplay", done);
+        audio.src = stem.url;
+        audio.load();
+        window.setTimeout(done, 8000);
+      })),
+    );
+    const newDur = multitrack?.getDuration?.() || totalDuration;
+    if (newDur > 0) {
+      setTotalDuration(newDur);
+      buildRuler(newDur);
+      buildPresenceRuler(newDur);
+    }
+    const seekTo = frac * (totalDuration || newDur);
+    multitrack?.pause?.();
+    multitrack?.setTime?.(seekTo);
+    driveTransportUi(seekTo);
+    setTransportPausedUi();
+    wireSpectrumAnalyzer();
+  } finally {
+    setWaveformLoading(false);
+    syncPitchTempoUi();
+  }
+}
+
+registerPitchTempoReload(reloadStemsForPitchTempo);
 
 function _regionFilename(ext) {
   const safe = _currentTitle

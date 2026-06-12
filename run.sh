@@ -109,6 +109,12 @@ setup() {
         else
             echo "ffmpeg: already installed ($(ffmpeg -version | head -n1))"
         fi
+        if ! command -v rubberband >/dev/null 2>&1; then
+            echo "==> brew install rubberband"
+            brew install rubberband
+        else
+            echo "rubberband: already installed ($(rubberband --version 2>&1 | head -n1))"
+        fi
         if ! command -v uv >/dev/null 2>&1; then
             echo "==> brew install uv"
             brew install uv
@@ -127,6 +133,12 @@ setup() {
             sudo apt-get install -y ffmpeg
         else
             echo "ffmpeg: already installed ($(ffmpeg -version | head -n1))"
+        fi
+        if ! command -v rubberband >/dev/null 2>&1; then
+            echo "==> sudo apt-get install -y rubberband-cli"
+            sudo apt-get install -y rubberband-cli
+        else
+            echo "rubberband: already installed ($(rubberband --version 2>&1 | head -n1))"
         fi
         if ! command -v uv >/dev/null 2>&1; then
             echo "==> installing uv via astral.sh installer"

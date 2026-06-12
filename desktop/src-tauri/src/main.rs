@@ -507,6 +507,7 @@ fn ensure_external_assets() -> Result<AssetStatus, String> {
     ensure_workspace()?;
     let data_dir = local_data_dir()?;
     let ffmpeg = ensure_ffmpeg(&data_dir)?;
+    ensure_rubberband(&data_dir)?;
     write_setup_config(&data_dir, &ffmpeg)?;
     Ok(AssetStatus {
         ffmpeg_ready: true,
@@ -1792,6 +1793,7 @@ fn ensure_ffmpeg(data_dir: &Path) -> Result<PathBuf, String> {
         let portable =
             ffmpeg_path(data_dir).ok_or_else(|| "failed to resolve FFmpeg path".to_string())?;
         verify_ffmpeg(&portable)?;
+        ensure_rubberband(data_dir)?;
         Ok(portable)
     }
 
@@ -1939,6 +1941,62 @@ fn make_executable(path: &Path) -> Result<(), String> {
             "failed to chmod {}: {}",
             path.display(),
             String::from_utf8_lossy(&output.stderr).trim()
+        ))
+    }
+}
+
+fn rubberband_path(data_dir: &Path) -> PathBuf {
+    data_dir.join("ffmpeg").join("rubberband")
+}
+
+fn embedded_rubberband_pack() -> Option<PathBuf> {
+    let root = app_root().ok()?;
+    let pack = root.join("rubberband-pack.tar.zst");
+    pack.is_file().then_some(pack)
+}
+
+/// Install Rubber Band CLI beside bundled FFmpeg when an embedded pack is available.
+/// macOS evermeet FFmpeg lacks the rubberband filter; Windows essentials includes it.
+fn ensure_rubberband(data_dir: &Path) -> Result<(), String> {
+    let target = rubberband_path(data_dir);
+    if target.is_file() {
+        return verify_rubberband(&target);
+    }
+
+    #[cfg(target_os = "macos")]
+    if let Some(pack) = embedded_rubberband_pack() {
+        let ffmpeg_dir = data_dir.join("ffmpeg");
+        fs::create_dir_all(&ffmpeg_dir)
+            .map_err(|e| format!("failed to create {}: {e}", ffmpeg_dir.display()))?;
+        extract_tar_archive(&pack, &ffmpeg_dir)?;
+        make_executable(&target)?;
+        return verify_rubberband(&target);
+    }
+
+    Ok(())
+}
+
+fn verify_rubberband(path: &Path) -> Result<(), String> {
+    let mut command = Command::new(path);
+    command
+        .arg("--version")
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped());
+    hide_console_window(&mut command);
+    let output = command_output_with_timeout(
+        command,
+        Duration::from_secs(15),
+        "Rubber Band check",
+    )
+    .map_err(|e| format!("failed to run Rubber Band at {}: {e}", path.display()))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        Err(format!(
+            "Rubber Band at {} failed verification: {}",
+            path.display(),
+            stderr.trim()
         ))
     }
 }

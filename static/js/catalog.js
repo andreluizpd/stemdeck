@@ -3,6 +3,7 @@ import { STEM_NAMES } from "./constants.js";
 import { wireUpAudio, updateFooterTrack } from "./player.js";
 import { initSections } from "./sections.js";
 import { bpmChip, keyChip, saveSelectedStems, selectedStems, titleEl } from "./state.js";
+import { setDetectedBpm, setDetectedKey } from "./pitchTempo.js";
 import { showError, importFromUrl } from "./job.js";
 import { fmtTime, storeGet, storeSet } from "./utils.js";
 
@@ -378,7 +379,8 @@ export function applyStemPresenceCards(stemPresence) {
 
 function applyTrackInfoToPanel(track) {
   titleEl.textContent = track.title || "Untitled track";
-  bpmChip.textContent = track.bpm ? `${track.bpm} BPM` : "— BPM";
+  setDetectedBpm(track.bpm ?? null);
+  setDetectedKey(track.key ?? null);
   keyChip.textContent = track.key || "— —";
   updateFooterTrack({
     title: track.title,

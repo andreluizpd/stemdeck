@@ -28,6 +28,11 @@ done
 
 mkdir -p "$BUILD_DIR"
 
+if [[ ! -f "$BUILD_DIR/StemDeck-rubberband-macOS-${ARCH}.tar.zst" ]]; then
+  echo "==> Building Rubber Band pack (${ARCH})"
+  ARCH="$ARCH" "$REPO_ROOT/scripts/macos/make-rubberband-pack.sh"
+fi
+
 echo "==> Stamping version ${VERSION}"
 sed -i '' "s/^version = \".*\"/version = \"${VERSION}\"/" "$REPO_ROOT/desktop/src-tauri/Cargo.toml"
 sed -i '' "s/\"version\": \".*\"/\"version\": \"${VERSION}\"/" "$REPO_ROOT/desktop/src-tauri/tauri.conf.json"
@@ -64,6 +69,11 @@ if [[ -f "$BUILD_DIR/runtime-manifest-${ARCH}.json" ]]; then
   cp "$BUILD_DIR/runtime-manifest-${ARCH}.json" "$RESOURCES/runtime-manifest.json"
 else
   cp "$REPO_ROOT/desktop/ui/runtime-manifest.json" "$RESOURCES/runtime-manifest.json"
+fi
+
+RUBBERBAND_PACK="$BUILD_DIR/StemDeck-rubberband-macOS-${ARCH}.tar.zst"
+if [[ -f "$RUBBERBAND_PACK" ]]; then
+  cp "$RUBBERBAND_PACK" "$RESOURCES/rubberband-pack.tar.zst"
 fi
 
 if [[ -f "$REPO_ROOT/packaging/macos/THIRD_PARTY_NOTICES.txt" ]]; then

@@ -15,6 +15,15 @@ from starlette.background import BackgroundTask
 
 from app.core.config import JOB_ID_RE, JOBS_DIR, STEM_NAMES, TIMEOUT_FFMPEG, ffmpeg_executable
 from app.core.registry import get as registry_get
+from app.pipeline.pitch_tempo import (
+    PITCH_MAX,
+    PITCH_MIN,
+    TEMPO_MAX,
+    TEMPO_MIN,
+    ensure_shifted,
+    is_identity,
+    pitch_tempo_available,
+)
 
 logger = logging.getLogger("stemdeck.api")
 
@@ -42,6 +51,43 @@ _ENCODE_ARGS = {
 }
 MIXDOWN_CODECS = {ext: [*args, "-f", ext] for ext, args in _ENCODE_ARGS.items()}
 MIXDOWN_MEDIA_TYPES = {"wav": "audio/wav", "mp3": "audio/mpeg", "flac": "audio/flac"}
+
+
+def _parse_pitch_tempo(
+    pitch: float | None,
+    tempo: float | None,
+    preserve_pitch: bool | None,
+) -> tuple[float, float, bool]:
+    pitch_v = 0.0 if pitch is None else float(pitch)
+    tempo_v = 1.0 if tempo is None else float(tempo)
+    preserve_v = True if preserve_pitch is None else bool(preserve_pitch)
+    if pitch_v < PITCH_MIN or pitch_v > PITCH_MAX:
+        raise HTTPException(status_code=422, detail="pitch out of range")
+    if tempo_v < TEMPO_MIN or tempo_v > TEMPO_MAX:
+        raise HTTPException(status_code=422, detail="tempo out of range")
+    return pitch_v, tempo_v, preserve_v
+
+
+def _resolve_stem_path(
+    job_id: str,
+    name: str,
+    pitch: float = 0.0,
+    tempo: float = 1.0,
+    preserve_pitch: bool = True,
+) -> Path:
+    path = _validate_stem_path(job_id, name)
+    if is_identity(pitch, tempo):
+        return path
+    if not pitch_tempo_available():
+        raise HTTPException(
+            status_code=503,
+            detail="pitch/tempo requires rubberband CLI or ffmpeg with librubberband",
+        )
+    try:
+        return ensure_shifted(path, JOBS_DIR, job_id, name, pitch, tempo, preserve_pitch)
+    except Exception as exc:
+        logger.exception("pitch/tempo shift failed for %s/%s", job_id, name)
+        raise HTTPException(status_code=500, detail="pitch/tempo processing failed") from exc
 
 
 def _validate_stem_path(job_id: str, name: str):
@@ -102,9 +148,21 @@ async def get_stem(
     name: str,
     start: float | None = Query(default=None, ge=0, description="Trim start in seconds"),
     end: float | None = Query(default=None, gt=0, description="Trim end in seconds"),
+    pitch: float | None = Query(
+        default=None, description="Pitch shift in semitones (-12 to +12)"
+    ),
+    tempo: float | None = Query(
+        default=None, ge=TEMPO_MIN, le=TEMPO_MAX, description="Tempo ratio (1.0 = unchanged)"
+    ),
+    preserve_pitch: bool | None = Query(
+        default=None, description="Keep pitch when changing tempo (tape mode when false)"
+    ),
 ) -> FileResponse | StreamingResponse:
     """Download a WAV stem. Optional ?start=&end= trims to a time region."""
-    path = _validate_stem_path(job_id, name)
+    pitch_v, tempo_v, preserve_v = _parse_pitch_tempo(pitch, tempo, preserve_pitch)
+    path = await asyncio.to_thread(
+        _resolve_stem_path, job_id, name, pitch_v, tempo_v, preserve_v
+    )
 
     if start is None and end is None:
         return FileResponse(path, media_type="audio/wav", filename=f"{name}.wav")
@@ -145,9 +203,15 @@ async def get_stem_mp3(
     name: str,
     start: float | None = Query(default=None, ge=0, description="Trim start in seconds"),
     end: float | None = Query(default=None, gt=0, description="Trim end in seconds"),
+    pitch: float | None = Query(default=None, description="Pitch shift in semitones"),
+    tempo: float | None = Query(default=None, ge=TEMPO_MIN, le=TEMPO_MAX),
+    preserve_pitch: bool | None = Query(default=None),
 ) -> StreamingResponse:
     """Stream a stem as MP3 (VBR ~190 kbps). Optional ?start=&end= trims to a time region."""
-    path = _validate_stem_path(job_id, name)
+    pitch_v, tempo_v, preserve_v = _parse_pitch_tempo(pitch, tempo, preserve_pitch)
+    path = await asyncio.to_thread(
+        _resolve_stem_path, job_id, name, pitch_v, tempo_v, preserve_v
+    )
 
     if (start is None) != (end is None) or (start is not None and start >= end):
         raise HTTPException(
@@ -189,6 +253,9 @@ async def get_mixdown(
     gains: str = Query(..., description="Comma-separated linear gains, parallel to stems"),
     start: float | None = Query(default=None, ge=0, description="Trim start in seconds"),
     end: float | None = Query(default=None, gt=0, description="Trim end in seconds"),
+    pitch: float | None = Query(default=None, description="Pitch shift in semitones"),
+    tempo: float | None = Query(default=None, ge=TEMPO_MIN, le=TEMPO_MAX),
+    preserve_pitch: bool | None = Query(default=None),
 ) -> StreamingResponse:
     """Render a fresh mixdown of the given lanes at the given gains, streamed as
     WAV or MP3. Mirrors the studio mixer (per-stem volume, mute, solo) so the
@@ -218,8 +285,13 @@ async def get_mixdown(
             detail="start and end are both required and start must be less than end",
         )
 
+    pitch_v, tempo_v, preserve_v = _parse_pitch_tempo(pitch, tempo, preserve_pitch)
+
     # Validates job_id (404), job done (404), and path traversal (404) per stem.
-    paths = [_validate_stem_path(job_id, name) for name in names]
+    paths = [
+        await asyncio.to_thread(_resolve_stem_path, job_id, name, pitch_v, tempo_v, preserve_v)
+        for name in names
+    ]
 
     pre_seek = ["-ss", str(start)] if start is not None else []
     post_seek = ["-t", str(end - start)] if start is not None else []
@@ -298,6 +370,9 @@ async def get_all_stems_zip(
     job_id: str,
     fmt: str = Query(default="wav", alias="format"),
     stems: str | None = Query(default=None, description="Comma-separated stems; default all"),
+    pitch: float | None = Query(default=None, description="Pitch shift in semitones"),
+    tempo: float | None = Query(default=None, ge=TEMPO_MIN, le=TEMPO_MAX),
+    preserve_pitch: bool | None = Query(default=None),
 ) -> FileResponse:
     """Bundle the requested stems into a single ZIP, named after the song.
 
@@ -325,11 +400,23 @@ async def get_all_stems_zip(
     if not stems_dir.is_dir() or not stems_dir.is_relative_to(jobs_root):
         raise HTTPException(status_code=404, detail="stems not found")
 
+    pitch_v, tempo_v, preserve_v = _parse_pitch_tempo(pitch, tempo, preserve_pitch)
+
     sources: list[tuple[str, Path]] = []
     for name in wanted:
-        p = (stems_dir / f"{name}.wav").resolve()
-        if p.is_file() and p.is_relative_to(jobs_root):
-            sources.append((name, p))
+        raw = (stems_dir / f"{name}.wav").resolve()
+        if not raw.is_file() or not raw.is_relative_to(jobs_root):
+            continue
+        try:
+            p = await asyncio.to_thread(
+                _resolve_stem_path, job_id, name, pitch_v, tempo_v, preserve_v
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.exception("pitch/tempo shift failed for zip %s/%s", job_id, name)
+            raise HTTPException(status_code=500, detail="pitch/tempo processing failed") from exc
+        sources.append((name, p))
     if not sources:
         raise HTTPException(status_code=404, detail="no stems found")
 

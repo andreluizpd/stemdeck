@@ -22,7 +22,15 @@ const AudioCtx = window.AudioContext || window.webkitAudioContext;
 export function createAudioEngine(stems, { onTime, onEnded } = {}) {
   const ctx = new AudioCtx();
   const master = ctx.createGain();
+  const mixAnalyser = ctx.createAnalyser();
+  mixAnalyser.fftSize = 2048;
+  mixAnalyser.smoothingTimeConstant = 0.72;
+  mixAnalyser.minDecibels = -96;
+  mixAnalyser.maxDecibels = -8;
+  // Master feeds speakers and a parallel analyser tap (analyser as dead-end
+  // branch can fail to pull in some browsers).
   master.connect(ctx.destination);
+  master.connect(mixAnalyser);
 
   /** @type {Map<string,{buffer:AudioBuffer,gain:GainNode,analyser:AnalyserNode,source:AudioBufferSourceNode|null}>} */
   const tracks = new Map();
@@ -33,6 +41,8 @@ export function createAudioEngine(stems, { onTime, onEnded } = {}) {
   let rafId = null;
   let destroyed = false;
   let loop = { enabled: false, start: 0, end: 0 };
+  let playbackRate = 1;
+  let detuneCents = 0;
 
   // Decode all stems up front. Resolves true once at least one stem is ready.
   const ready = (async () => {
@@ -46,7 +56,10 @@ export function createAudioEngine(stems, { onTime, onEnded } = {}) {
           if (destroyed) return;
           const gain = ctx.createGain();
           const analyser = ctx.createAnalyser();
-          analyser.fftSize = 1024;
+          analyser.fftSize = 2048;
+          analyser.smoothingTimeConstant = 0.72;
+          analyser.minDecibels = -96;
+          analyser.maxDecibels = -8;
           gain.connect(analyser);
           analyser.connect(master);
           tracks.set(s.name, { buffer, gain, analyser, source: null });
@@ -59,7 +72,16 @@ export function createAudioEngine(stems, { onTime, onEnded } = {}) {
     return tracks.size > 0;
   })();
 
-  const now = () => (playing ? ctx.currentTime - startCtxTime + startOffset : startOffset);
+  const now = () => {
+    if (!playing) return startOffset;
+    const elapsed = (ctx.currentTime - startCtxTime) * playbackRate;
+    return startOffset + elapsed;
+  };
+
+  function applySourcePitchTempo(src) {
+    src.playbackRate.value = playbackRate;
+    src.detune.value = detuneCents;
+  }
 
   function stopSources() {
     for (const t of tracks.values()) {
@@ -76,6 +98,7 @@ export function createAudioEngine(stems, { onTime, onEnded } = {}) {
     for (const t of tracks.values()) {
       const src = ctx.createBufferSource();
       src.buffer = t.buffer;
+      applySourcePitchTempo(src);
       src.connect(t.gain);
       src.start(when, Math.max(0, Math.min(offset, t.buffer.duration)));
       t.source = src;
@@ -141,6 +164,25 @@ export function createAudioEngine(stems, { onTime, onEnded } = {}) {
     master.gain.setTargetAtTime(Math.max(0, v), ctx.currentTime, 0.01);
   }
 
+  function setPitchTempo(rate, detune) {
+    const nextRate = Math.max(0.25, Math.min(4, rate));
+    const nextDetune = Math.max(-2400, Math.min(2400, detune));
+    if (nextRate === playbackRate && nextDetune === detuneCents) return;
+    const pos = now();
+    playbackRate = nextRate;
+    detuneCents = nextDetune;
+    if (playing) {
+      startOffset = pos;
+      startCtxTime = ctx.currentTime;
+    }
+    const when = ctx.currentTime;
+    for (const track of tracks.values()) {
+      if (!track.source) continue;
+      track.source.playbackRate.setValueAtTime(playbackRate, when);
+      track.source.detune.setValueAtTime(detuneCents, when);
+    }
+  }
+
   function destroy() {
     destroyed = true;
     stopSources();
@@ -161,7 +203,11 @@ export function createAudioEngine(stems, { onTime, onEnded } = {}) {
     setLoop: (enabled, start, end) => { loop = { enabled, start, end }; },
     setGain,
     setMasterGain,
+    setPitchTempo,
+    getPlaybackRate: () => playbackRate,
+    getDetuneCents: () => detuneCents,
     getAnalyser: (name) => tracks.get(name)?.analyser ?? null,
+    getMixAnalyser: () => mixAnalyser,
     // Decoded AudioBuffers keyed by stem name — reused by the visuals (overview
     // waveforms, mini-waves, VU envelopes, energy bars) so they don't need the
     // multitrack to also decode the audio. Map<name, AudioBuffer>.

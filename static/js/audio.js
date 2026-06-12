@@ -31,8 +31,10 @@ export function attachAnalysers() {
     let analyser;
     try {
       analyser = ctx.createAnalyser();
-      analyser.fftSize = 256;
-      analyser.smoothingTimeConstant = 0.5;
+      analyser.fftSize = 2048;
+      analyser.smoothingTimeConstant = 0.72;
+      analyser.minDecibels = -96;
+      analyser.maxDecibels = -8;
       if (isWebAudio) {
         // wavesurfer's audio wrapper exposes its internal gain node;
         // analyser taps the post-gain signal.
@@ -67,7 +69,7 @@ export function attachAnalysers() {
     const data = new Uint8Array(analyser.fftSize);
     const vuEl = mixerEl.querySelector(`.lane-vu[data-stem="${stemName}"]`);
     const miniMeterEl = document.querySelector(`.stem-list .${stemName} .mini-meter`);
-    trackAnalysers.push({ analyser, data, vuEl, miniMeterEl, peak: 0 });
+    trackAnalysers.push({ stemName, analyser, data, vuEl, miniMeterEl, peak: 0 });
   }
 
   const tick = () => {

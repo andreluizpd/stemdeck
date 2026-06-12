@@ -1,0 +1,76 @@
+name: Windows Portable
+
+on:
+  workflow_dispatch:
+    inputs:
+      variant:
+        description: Package variant
+        required: true
+        default: both
+        type: choice
+        options:
+          - both
+          - cpu
+          - nvidia
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    env:
+      PACKAGE_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || format('0.0.0-dev.{0}', github.run_number) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build NVIDIA portable package
+        if: github.event_name == 'push' || inputs.variant == 'both' || inputs.variant == 'nvidia'
+        shell: pwsh
+        run: |
+          ./scripts/windows/make-portable.ps1 `
+            -PackageName StemDeck-Windows-x64.NVIDIA `
+            -PackageVersion $env:PACKAGE_VERSION `
+            -StripVenv
+
+      - name: Build CPU portable package
+        if: github.event_name == 'push' || inputs.variant == 'both' || inputs.variant == 'cpu'
+        shell: pwsh
+        run: |
+          $args = @(
+            '-PackageName', 'StemDeck-Windows-x64',
+            '-PackageVersion', $env:PACKAGE_VERSION,
+            '-CpuOnly',
+            '-StripVenv'
+          )
+          if (Test-Path 'desktop/src-tauri/target/release/stemdeck.exe') {
+            $args += '-SkipTauriBuild'
+          }
+          & ./scripts/windows/make-portable.ps1 @args
+
+      - name: List artifacts
+        shell: pwsh
+        run: |
+          Get-ChildItem dist -File | Format-Table Name, @{n='MB';e={[math]::Round($_.Length/1MB,1)}}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stemdeck-windows-${{ github.run_number }}
+          path: |
+            dist/*.zip
+            dist/*.sha256
+          if-no-files-found: error

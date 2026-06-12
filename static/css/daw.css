@@ -1694,7 +1694,7 @@ input, textarea { font-family: inherit; }
 /* ── Transport footer ── */
 
 .daw-footer {
-  height: 200px;
+  height: 268px;
   flex-shrink: 0;
   border-top: 1px solid var(--border);
   background: var(--bg-2);
@@ -1798,6 +1798,30 @@ input, textarea { font-family: inherit; }
   display: flex; align-items: center; justify-content: flex-end; gap: 8px;
   min-width: 0;
 }
+/* Live FFT spectrum above the footer waveform scrubber */
+.footer-spectrum-bar {
+  height: 72px;
+  flex-shrink: 0;
+  position: relative;
+  overflow: hidden;
+  border-top: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(15, 20, 24, 0.92), rgba(11, 15, 18, 0.98));
+}
+.footer-spectrum-bar.hidden { display: none; }
+#footer-spectrum {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.app.no-track .footer-spectrum-bar { display: none; }
+#t-spectrum-btn.active {
+  color: var(--accent);
+  border-color: rgba(244, 183, 64, 0.35);
+  background: rgba(244, 183, 64, 0.08);
+}
+
 /* Wave bar at the bottom of the footer */
 .footer-wave-bar {
   height: 40px; flex-shrink: 0;
@@ -1957,6 +1981,66 @@ input, textarea { font-family: inherit; }
 .export-spinner { display: none; }
 .footer-chip.is-busy .export-dl-icon { display: none; }
 .footer-chip.is-busy .export-spinner { display: inline-block; animation: sections-spin 700ms linear infinite; }
+
+.chip-panel-pitch-tempo {
+  min-width: 300px; padding: 10px 12px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.pitch-tempo-row {
+  display: grid;
+  grid-template-columns: 48px 28px 1fr 28px 44px;
+  align-items: center;
+  gap: 6px;
+}
+.pitch-tempo-step {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; padding: 0;
+  background: var(--panel-3); border: 1px solid var(--border-strong);
+  border-radius: 6px; color: var(--fg);
+  font-size: 16px; font-weight: 500; line-height: 1;
+  font-family: inherit; cursor: pointer;
+  transition: background var(--t-fast), color var(--t-fast);
+}
+.pitch-tempo-step:hover { background: var(--bg); color: var(--accent); }
+.pitch-tempo-step:active { transform: scale(0.96); }
+.pitch-tempo-step:disabled { opacity: 0.35; cursor: not-allowed; }
+.pitch-tempo-label {
+  font-size: 11px; font-weight: 600; letter-spacing: 0.04em;
+  color: var(--muted); text-transform: uppercase;
+}
+.pitch-tempo-slider {
+  width: 100%; accent-color: var(--accent);
+  cursor: pointer;
+}
+.pitch-tempo-val-wrap {
+  display: flex; flex-direction: column; align-items: flex-end;
+  gap: 1px; min-width: 0;
+}
+.pitch-tempo-val {
+  font-size: 12px; color: var(--fg-2); text-align: right;
+  white-space: nowrap;
+}
+.pitch-tempo-key {
+  font-size: 10px; color: var(--muted); text-align: right;
+  white-space: nowrap;
+}
+.pitch-tempo-val-wrap:has(.pitch-tempo-key:not(.hidden)) .pitch-tempo-val {
+  font-size: 10px; color: var(--muted);
+}
+.pitch-tempo-val-wrap:has(.pitch-tempo-key:not(.hidden)) .pitch-tempo-key {
+  font-size: 12px; color: var(--accent); font-weight: 600;
+}
+.pitch-tempo-check {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12px; color: var(--fg-2); cursor: pointer;
+  user-select: none;
+}
+.pitch-tempo-check input { accent-color: var(--accent); }
+.pitch-tempo-reset {
+  margin-top: 2px; justify-content: center;
+  color: var(--muted); font-size: 12px;
+}
+.pitch-tempo-reset:hover { color: var(--fg); }
 
 .chip-panel-export { min-width: 260px; padding: 6px; }
 
@@ -2273,7 +2357,11 @@ input, textarea { font-family: inherit; }
 .daw.no-track .daw-content .job { opacity: 1; pointer-events: auto; }
 
 .app.no-track #t-export-btn,
-.app.is-import #t-export-btn {
+.app.is-import #t-export-btn,
+.app.no-track #t-pitch-tempo-btn,
+.app.is-import #t-pitch-tempo-btn,
+.app.no-track #t-spectrum-btn,
+.app.is-import #t-spectrum-btn {
   opacity: 0.35;
   pointer-events: none;
   cursor: default;
