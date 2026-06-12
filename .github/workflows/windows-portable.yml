@@ -51,16 +51,16 @@ jobs:
         if: github.event_name == 'push' || inputs.variant == 'both' || inputs.variant == 'cpu'
         shell: pwsh
         run: |
-          $args = @(
-            '-PackageName', 'StemDeck-Windows-x64',
-            '-PackageVersion', $env:PACKAGE_VERSION,
-            '-CpuOnly',
-            '-StripVenv'
-          )
-          if (Test-Path 'desktop/src-tauri/target/release/stemdeck.exe') {
-            $args += '-SkipTauriBuild'
+          $params = @{
+            PackageName = 'StemDeck-Windows-x64'
+            PackageVersion = $env:PACKAGE_VERSION
+            CpuOnly = $true
+            StripVenv = $true
           }
-          & ./scripts/windows/make-portable.ps1 @args
+          if (Test-Path 'desktop/src-tauri/target/release/stemdeck.exe') {
+            $params.SkipTauriBuild = $true
+          }
+          & ./scripts/windows/make-portable.ps1 @params
 
       - name: List artifacts
         shell: pwsh
